@@ -9,7 +9,7 @@ import re
 import os
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname=s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def normalize_title(title):
@@ -87,37 +87,32 @@ def save_test_result(test_name, status, details):
 
     if db_save_mode == 0 or db_save_mode == 2:
         logger.info("Saving result to PostgreSQL")
-        connection = get_postgres_connection()
         try:
+            connection = get_postgres_connection()
             cursor = connection.cursor()
             insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (%s, %s, %s)"
             cursor.execute(insert_query, (test_name, status, details))
             connection.commit()
             cursor.close()
+            connection.close()
             logger.info("Result saved to PostgreSQL successfully")
         except Exception as e:
-            connection.rollback()
             logger.error(f"Failed to save result to PostgreSQL: {str(e)}")
-            raise e
-        finally:
-            connection.close()
 
     if db_save_mode == 1 or db_save_mode == 2:
         logger.info("Saving result to Oracle")
-        connection = get_oracle_connection()
         try:
+            connection = get_oracle_connection()
+            logger.info("Oracle connection established successfully")
             cursor = connection.cursor()
             insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (:1, :2, :3)"
             cursor.execute(insert_query, (test_name, status, details))
             connection.commit()
             cursor.close()
+            connection.close()
             logger.info("Result saved to Oracle successfully")
         except Exception as e:
-            connection.rollback()
             logger.error(f"Failed to save result to Oracle: {str(e)}")
-            raise e
-        finally:
-            connection.close()
 
 def test_google_search_sponsored(page_with_results):
     test_name = 'test_google_search_sponsored'
