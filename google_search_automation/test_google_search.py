@@ -1,3 +1,5 @@
+import cx_Oracle
+import psycopg2
 from playwright.sync_api import sync_playwright
 from time import sleep
 import pytest
@@ -5,8 +7,6 @@ import requests
 import logging
 import re
 import os
-import cx_Oracle
-import psycopg2
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -58,40 +58,66 @@ def page_with_results(browser):
     yield page
     context.close()
 
-    
 def get_postgres_connection():
-    connection = psycopg2.connect(
+    return psycopg2.connect(
         dbname=os.getenv('POSTGRES_DBNAME', 'postgres'),
         user=os.getenv('POSTGRES_USER', 'postgres'),
         password=os.getenv('POSTGRES_PASSWORD', 'Roni2108'),
         host=os.getenv('POSTGRES_HOST', 'localhost'),
         port=int(os.getenv('POSTGRES_PORT', '5432'))
     )
-    return connection
 
-# # Set up logging
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# logger = logging.getLogger(__name__)
-
+def get_oracle_connection():
+    dsn = cx_Oracle.makedsn(
+        os.getenv('ORACLE_HOST', 'localhost'),
+        int(os.getenv('ORACLE_PORT', '1521')),
+        service_name=os.getenv('ORACLE_DBNAME', 'xe')
+    )
+    return cx_Oracle.connect(
+        user=os.getenv('ORACLE_USER', 'system'),
+        password=os.getenv('ORACLE_PASSWORD', 'Roni2108'),
+        dsn=dsn
+    )
 
 def save_test_result(test_name, status, details):
-    db_result = os.getenv('DB_RESULT')
+    db_save_mode = int(os.getenv('DB_SAVE_MODE', '0'))  # 0 = PostgreSQL, 1 = Oracle, 2 = Both
 
-    if db_result != 'postgresql':
-        raise ValueError("Unsupported DB_RESULT value. Use 'postgresql'.")
+    if db_save_mode not in [0, 1, 2]:
+        raise ValueError("Unsupported DB_SAVE_MODE value. Use 0 (PostgreSQL), 1 (Oracle), or 2 (Both).")
 
-    connection = get_postgres_connection()
+    if db_save_mode == 0 or db_save_mode == 2:
+        logger.info("Saving result to PostgreSQL")
+        connection = get_postgres_connection()
+        try:
+            cursor = connection.cursor()
+            insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (%s, %s, %s)"
+            cursor.execute(insert_query, (test_name, status, details))
+            connection.commit()
+            cursor.close()
+            logger.info("Result saved to PostgreSQL successfully")
+        except Exception as e:
+            connection.rollback()
+            logger.error(f"Failed to save result to PostgreSQL: {str(e)}")
+            raise e
+        finally:
+            connection.close()
 
-    cursor = connection.cursor()
-    insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (%s, %s, %s)"
-
-    cursor.execute(insert_query, (test_name, status, details))
-    connection.commit()
-    cursor.close()
-    connection.close()
-
-
-
+    if db_save_mode == 1 or db_save_mode == 2:
+        logger.info("Saving result to Oracle")
+        connection = get_oracle_connection()
+        try:
+            cursor = connection.cursor()
+            insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (:1, :2, :3)"
+            cursor.execute(insert_query, (test_name, status, details))
+            connection.commit()
+            cursor.close()
+            logger.info("Result saved to Oracle successfully")
+        except Exception as e:
+            connection.rollback()
+            logger.error(f"Failed to save result to Oracle: {str(e)}")
+            raise e
+        finally:
+            connection.close()
 
 def test_google_search_sponsored(page_with_results):
     test_name = 'test_google_search_sponsored'
