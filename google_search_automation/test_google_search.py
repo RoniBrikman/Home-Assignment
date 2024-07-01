@@ -19,7 +19,7 @@ def normalize_title(title):
 @pytest.fixture(scope="session")
 def browser():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         yield browser
         browser.close()
 
@@ -103,7 +103,6 @@ def save_test_result(test_name, status, details):
         logger.info("Saving result to Oracle")
         try:
             connection = get_oracle_connection()
-            logger.info("Oracle connection established successfully")
             cursor = connection.cursor()
             insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (:1, :2, :3)"
             cursor.execute(insert_query, (test_name, status, details))
@@ -121,7 +120,11 @@ def test_google_search_sponsored(page_with_results):
         page = page_with_results
 
         logger.info("Asserting that there is at least one sponsored result")
-        page.wait_for_selector('div[data-text-ad="1"]', timeout=60000)  # Increase timeout to 60 seconds
+        try:
+            page.wait_for_selector('div[data-text-ad="1"]', timeout=60000)  # Wait up to 60 seconds for a sponsored result
+        except Exception as e:
+            raise AssertionError("No sponsored results found within the timeout period!") from e
+
         sponsored_results = page.query_selector_all('div[data-text-ad="1"]')
         assert len(sponsored_results) > 0, "No sponsored results found!"
         logger.info(f"Found {len(sponsored_results)} sponsored results")
@@ -139,12 +142,13 @@ def test_google_search_sponsored(page_with_results):
 
         assert sponsored_url is not None, "No sponsored URL found!"
         logger.info("Sponsored URL found successfully")
-        
+
         save_test_result(test_name, 'PASSED', 'Sponsored URL found and saved successfully.')
     except Exception as e:
         logger.error(f"Test {test_name} failed: {str(e)}")
         save_test_result(test_name, 'FAILED', str(e))
         raise
+
 
 def test_api_call_to_sponsored_url():
     test_name = 'test_api_call_to_sponsored_url'
@@ -195,11 +199,19 @@ def test_youtube_videos_count(page_with_results):
         page.wait_for_load_state('networkidle')
 
         logger.info("Asserting that there are at least two results from youtube.com on the first page")
-        youtube_results = [result for result in page.query_selector_all('a[href*="youtube.com/watch"]') if 'youtube.com' in result.get_attribute('href')]
-        assert len(youtube_results) >= 2, f"Expected at least 2 YouTube results, but found {len(youtube_results)}"
-        logger.info(f"Found {len(youtube_results)} YouTube results on the first page of the 'Videos' tab")
-        
-        save_test_result(test_name, 'PASSED', f"Found {len(youtube_results)} YouTube results.")
+        youtube_results = page.query_selector_all('a[href*="youtube.com/watch"]')
+
+        found_count = 0
+        for result in youtube_results:
+            if 'youtube.com' in result.get_attribute('href'):
+                found_count += 1
+            if found_count >= 2:
+                break
+
+        assert found_count >= 2, f"Expected at least 2 YouTube results, but found {found_count}"
+        logger.info(f"Found {found_count} YouTube results on the first page of the 'Videos' tab")
+
+        save_test_result(test_name, 'PASSED', f"Found {found_count} YouTube results.")
     except Exception as e:
         logger.error(f"Test {test_name} failed: {str(e)}")
         save_test_result(test_name, 'FAILED', str(e))
