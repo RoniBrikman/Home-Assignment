@@ -1,15 +1,28 @@
 import cx_Oracle
 import psycopg2
 from playwright.sync_api import sync_playwright
-from time import sleep
 import pytest
 import requests
 import logging
 import re
 import os
 
+
+
+os.environ['ORACLE_HOST'] = 'DESKTOP-CKAGB2K'
+os.environ['ORACLE_PORT'] = '1521'
+os.environ['ORACLE_DBNAME'] = 'xe'
+os.environ['ORACLE_USER'] = 'system'
+os.environ['ORACLE_PASSWORD'] = 'Roni2108'
+
+os.environ['POSTGRES_HOST'] = 'localhost'
+os.environ['POSTGRES_PORT'] = '5432'
+os.environ['POSTGRES_DBNAME'] = 'postgres'
+os.environ['POSTGRES_USER'] = 'postgres'
+os.environ['POSTGRES_PASSWORD'] = 'Roni2108'
+
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname=s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def normalize_title(title):
@@ -79,6 +92,8 @@ def get_oracle_connection():
         dsn=dsn
     )
 
+
+
 def save_test_result(test_name, status, details):
     db_save_mode = int(os.getenv('DB_SAVE_MODE', '0'))  # 0 = PostgreSQL, 1 = Oracle, 2 = Both
 
@@ -90,7 +105,10 @@ def save_test_result(test_name, status, details):
         try:
             connection = get_postgres_connection()
             cursor = connection.cursor()
-            insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (%s, %s, %s)"
+            insert_query = """
+                INSERT INTO test_results (test_name, status, details, timestamp)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            """
             cursor.execute(insert_query, (test_name, status, details))
             connection.commit()
             cursor.close()
@@ -104,7 +122,10 @@ def save_test_result(test_name, status, details):
         try:
             connection = get_oracle_connection()
             cursor = connection.cursor()
-            insert_query = "INSERT INTO test_results (test_name, status, details) VALUES (:1, :2, :3)"
+            insert_query = """
+                INSERT INTO test_results (test_name, status, details, test_time)
+                VALUES (:1, :2, :3, SYSTIMESTAMP)
+            """
             cursor.execute(insert_query, (test_name, status, details))
             connection.commit()
             cursor.close()
@@ -113,11 +134,18 @@ def save_test_result(test_name, status, details):
         except Exception as e:
             logger.error(f"Failed to save result to Oracle: {str(e)}")
 
+
+# Global variables to keep track of dependencies
+sponsored_url = None
+search_performed = False
+
 def test_google_search_sponsored(page_with_results):
+    global sponsored_url, search_performed
     test_name = 'test_google_search_sponsored'
     try:
         logger.info("Running test_google_search_sponsored")
         page = page_with_results
+        search_performed = True
 
         logger.info("Asserting that there is at least one sponsored result")
         try:
@@ -149,9 +177,12 @@ def test_google_search_sponsored(page_with_results):
         save_test_result(test_name, 'FAILED', str(e))
         raise
 
-
 def test_api_call_to_sponsored_url():
+    global sponsored_url
     test_name = 'test_api_call_to_sponsored_url'
+    if not sponsored_url:
+        logger.info(f"Skipping {test_name} because no sponsored URL was found in the previous test.")
+        pytest.skip(f"Skipping {test_name} because no sponsored URL was found in the previous test.")
     try:
         with open("sponsored_url.txt", "r") as f:
             sponsored_url = f.read().strip()
@@ -162,7 +193,7 @@ def test_api_call_to_sponsored_url():
         logger.info(f"Received response with status code: {response.status_code}")
         assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
         logger.info("API call to the sponsored URL was successful with status code 200")
-        
+
         save_test_result(test_name, 'PASSED', 'API call to the sponsored URL was successful.')
     except Exception as e:
         logger.error(f"Test {test_name} failed: {str(e)}")
@@ -170,7 +201,11 @@ def test_api_call_to_sponsored_url():
         raise
 
 def test_check_dominos_in_response():
+    global sponsored_url
     test_name = 'test_check_dominos_in_response'
+    if not sponsored_url:
+        logger.info(f"Skipping {test_name} because no sponsored URL was found in the previous test.")
+        pytest.skip(f"Skipping {test_name} because no sponsored URL was found in the previous test.")
     try:
         with open("sponsored_url.txt", "r") as f:
             sponsored_url = f.read().strip()
@@ -181,7 +216,7 @@ def test_check_dominos_in_response():
         logger.info("Checking if 'Domino's' or 'Dominos' is present in the response content")
         assert "Domino's" in response.text or "Dominos" in response.text, "Response does not contain 'Domino's' or 'Dominos'"
         logger.info("'Domino's' or 'Dominos' is present in the response content")
-        
+
         save_test_result(test_name, 'PASSED', "'Domino's' or 'Dominos' is present in the response content.")
     except Exception as e:
         logger.error(f"Test {test_name} failed: {str(e)}")
@@ -189,10 +224,16 @@ def test_check_dominos_in_response():
         raise
 
 def test_youtube_videos_count(page_with_results):
+    global search_performed
     test_name = 'test_youtube_videos_count'
     try:
         page = page_with_results
         logger.info("Running test_youtube_videos_count")
+
+        if not search_performed:
+            search_performed = True
+        else:
+            logger.info("Using the previously performed search for 'Domino's'")
 
         logger.info("Navigating to the 'Videos' tab")
         page.click('text="Videos"')
@@ -218,9 +259,15 @@ def test_youtube_videos_count(page_with_results):
         raise
 
 def test_youtube_videos_relevance(page_with_results):
+    global search_performed
     test_name = 'test_youtube_videos_relevance'
     try:
         page = page_with_results
+        if not search_performed:
+            search_performed = True
+        else:
+            logger.info("Using the previously performed search for 'Domino's'")
+
         logger.info("Running test_youtube_videos_relevance")
 
         logger.info("Navigating to the 'Videos' tab")
@@ -229,10 +276,10 @@ def test_youtube_videos_relevance(page_with_results):
 
         logger.info("Asserting that the videos are related to the search term 'Domino's' or 'Dominos'")
         youtube_results = page.query_selector_all('a[href*="youtube.com/watch"]')
-        
+
         assert len(youtube_results) > 0, "No YouTube results found"
         logger.info(f"Found {len(youtube_results)} YouTube results on the first page of the 'Videos' tab")
-        
+
         for result in youtube_results:
             # Narrow down to the element that likely contains the title
             title_element = result.query_selector('h3, span[aria-label], div[aria-label]')  # Adjust as necessary to target the title
